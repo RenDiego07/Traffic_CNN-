@@ -1,4 +1,6 @@
 data/
+models/
 *.zip
 *.jpg
 *.png
+*.pth
