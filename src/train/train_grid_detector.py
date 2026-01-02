@@ -17,13 +17,22 @@ Configuración optimizada para:
     - Épocas: 50
 
 Uso:
+    # Entrenar desde cero
     python train_grid_detector.py
+    
+    # Reanudar desde último checkpoint
+    python train_grid_detector.py --resume
+    
+    # Reanudar desde checkpoint específico
+    python train_grid_detector.py --resume --checkpoint models/traffic_model_ep25.pth
     
     Importante: Ajustar las rutas img_dir y label_dir según tu estructura de carpetas
 """
 
 import sys
 import os
+import argparse
+import glob
 import torch
 from torch.utils.data import DataLoader
 
@@ -39,7 +48,63 @@ from dataset.dtset import TrafficFlowDataset
 from models.architecture import TrafficQuantizerNet
 from models.loss import TrafficLoss
 
-def train():
+def find_latest_checkpoint(checkpoint_dir):
+    """
+    Encuentra el checkpoint más reciente en el directorio.
+    
+    Args:
+        checkpoint_dir (str): Directorio donde buscar checkpoints
+        
+    Returns:
+        str or None: Ruta al checkpoint más reciente, o None si no existe
+    """
+    pattern = os.path.join(checkpoint_dir, 'traffic_model_ep*.pth')
+    checkpoints = glob.glob(pattern)
+    
+    if not checkpoints:
+        return None
+    
+    # Extraer número de época y ordenar
+    def get_epoch(path):
+        basename = os.path.basename(path)
+        # Extraer número: traffic_model_ep25.pth -> 25
+        epoch_str = basename.replace('traffic_model_ep', '').replace('.pth', '')
+        try:
+            return int(epoch_str)
+        except ValueError:
+            return 0
+    
+    latest = max(checkpoints, key=get_epoch)
+    return latest
+
+def load_checkpoint(checkpoint_path, model, optimizer, device):
+    """
+    Carga un checkpoint y restaura el estado del modelo y optimizador.
+    
+    Args:
+        checkpoint_path (str): Ruta al archivo .pth
+        model (nn.Module): Modelo a cargar
+        optimizer (Optimizer): Optimizador a restaurar
+        device (torch.device): Dispositivo donde cargar
+        
+    Returns:
+        int: Época desde donde continuar
+    """
+    print(f"\n📂 Cargando checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch']
+    last_loss = checkpoint.get('loss', 0.0)
+    
+    print(f"✅ Checkpoint cargado exitosamente")
+    print(f"   - Época: {start_epoch}")
+    print(f"   - Loss anterior: {last_loss:.4f}")
+    
+    return start_epoch
+
+def train(resume=False, checkpoint_path=None):
     """
     Función principal de entrenamiento.
     
@@ -135,13 +200,32 @@ def train():
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # ========================================================================
-    # 5. BUCLE DE ENTRENAMIENTO
+    # 5. CARGAR CHECKPOINT (SI SE SOLICITA)
+    # ========================================================================
+    start_epoch = 0
+    
+    if resume:
+        # Si no se especificó checkpoint, buscar el más reciente
+        if checkpoint_path is None:
+            checkpoint_path = find_latest_checkpoint(checkpoint_dir)
+            
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            start_epoch = load_checkpoint(checkpoint_path, model, optimizer, device)
+        else:
+            print(f"\n⚠️  No se encontró checkpoint. Comenzando desde época 0.")
+            start_epoch = 0
+
+    # ========================================================================
+    # 6. BUCLE DE ENTRENAMIENTO
     # ========================================================================
     print(f"\n{'='*60}")
-    print(f"INICIANDO ENTRENAMIENTO")
+    if start_epoch > 0:
+        print(f"REANUDANDO ENTRENAMIENTO (Época {start_epoch + 1} → {NUM_EPOCHS})")
+    else:
+        print(f"INICIANDO ENTRENAMIENTO")
     print(f"{'='*60}\n")
     
-    for epoch in range(NUM_EPOCHS):
+    for epoch in range(start_epoch, NUM_EPOCHS):
         model.train()
         epoch_loss = 0
         epoch_loss_hm = 0
@@ -200,7 +284,7 @@ def train():
             print(f"💾 Checkpoint guardado: {checkpoint_path}\n")
 
     # ========================================================================
-    # 6. FINALIZACIÓN
+    # 7. FINALIZACIÓN
     # ========================================================================
     # Guardar modelo final
     final_path = os.path.join(checkpoint_dir, "traffic_model_final.pth")
@@ -219,4 +303,23 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    # Parsear argumentos de línea de comandos
+    parser = argparse.ArgumentParser(
+        description='Entrenar TrafficQuantizerNet con soporte para checkpoints'
+    )
+    parser.add_argument(
+        '--resume', 
+        action='store_true',
+        help='Reanudar entrenamiento desde el último checkpoint'
+    )
+    parser.add_argument(
+        '--checkpoint',
+        type=str,
+        default=None,
+        help='Ruta específica al checkpoint para cargar'
+    )
+    
+    args = parser.parse_args()
+    
+    # Iniciar entrenamiento
+    train(resume=args.resume, checkpoint_path=args.checkpoint)
