@@ -102,7 +102,7 @@ def calculate_iou(box1, box2):
     return inter_area / union_area
 
 
-def decode_predictions(hm, wh, reg, score_threshold=0.15, max_detections=100):
+def decode_predictions(hm, wh, reg, score_threshold=0.25, max_detections=100):
     """
     Decodifica las salidas del modelo en bounding boxes.
     
@@ -292,7 +292,7 @@ def calculate_ap(predictions, ground_truths, iou_threshold=0.5):
     return ap, precisions, recalls
 
 
-def visualize_predictions(image, pred_boxes, gt_boxes, score_threshold=0.15):
+def visualize_predictions(image, pred_boxes, gt_boxes, score_threshold=0.25):
     """
     Visualiza predicciones y ground truth en la imagen.
     
@@ -481,7 +481,7 @@ def calculate_counting_metrics(predictions, ground_truths):
     }
 
 
-def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_threshold=0.15):
+def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_threshold=0.25):
     """
     Crea una visualización comparativa de heatmaps predichos vs ground truth.
     
@@ -551,7 +551,7 @@ def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_thresh
     return fig
 
 
-def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_path, score_threshold=0.15):
+def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_path, score_threshold=0.25):
     """
     Guarda la visualización comparativa de heatmaps.
     
@@ -569,7 +569,7 @@ def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_pa
     plt.close(fig)
 
 
-def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='results/', score_threshold=0.15, nms_threshold=0.5):
+def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='results/', score_threshold=0.25, nms_threshold=0.5):
     """
     Función principal de evaluación.
     
