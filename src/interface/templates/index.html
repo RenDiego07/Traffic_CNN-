@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contador de Vehículos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Analizador de Tráfico Vehicular</h1>
+    <p>Cargue una imagen de una intersección (1920x1080) para cuantificar los vehículos presentes.</p>
+    
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" id="file-input" name="file" accept="image/*" required>
+        <button type="submit">Analizar Imagen</button>
+    </form>
+
+    <div id="result-container">
+        <h2>Resultado del Análisis</h2>
+        <div id="image-preview"></div>
+        <p>Número de vehículos detectados: <strong id="vehicle-count">---</strong></p>
+    </div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('file-input');
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const resultCount = document.getElementById('vehicle-count');
+            const imagePreview = document.getElementById('image-preview');
+            
+            resultCount.textContent = 'Procesando...';
+            imagePreview.innerHTML = ''; // Limpiar vista previa anterior
+
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.style.maxWidth = '500px';
+                    img.style.maxHeight = '500px';
+                    imagePreview.appendChild(img);
+                }
+                reader.readAsDataURL(file);
+            }
+
+            fetch('/predict', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    resultCount.textContent = `Error: ${data.error}`;
+                } else {
+                    resultCount.textContent = data.vehicle_count;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultCount.textContent = 'Error en la comunicación con el servidor.';
+            });
+        });
+    </script>
+</body>
+</html>
