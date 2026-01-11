@@ -102,7 +102,7 @@ def calculate_iou(box1, box2):
     return inter_area / union_area
 
 
-def decode_predictions(hm, wh, reg, score_threshold=0.25, max_detections=100):
+def decode_predictions(hm, wh, reg, score_threshold=0.15, max_detections=100):
     """
     Decodifica las salidas del modelo en bounding boxes.
     
@@ -292,37 +292,164 @@ def calculate_ap(predictions, ground_truths, iou_threshold=0.5):
     return ap, precisions, recalls
 
 
-def visualize_predictions(image, pred_boxes, gt_boxes, score_threshold=0.25):
+def visualize_predictions_only(image, pred_boxes, score_threshold=0.15):
     """
-    Visualiza predicciones y ground truth en la imagen.
+    Visualiza SOLO las predicciones del modelo (sin ground truth).
     
     Args:
         image: PIL Image (512x512)
         pred_boxes: Lista de predicciones [x1, y1, x2, y2, score]
-        gt_boxes: Lista de GT [x1, y1, x2, y2]
         score_threshold: Umbral para visualizar
         
     Returns:
-        PIL Image con visualización
+        PIL Image con solo predicciones y contador
     """
     # Escalar del grid (128) a imagen (512)
     scale = 512 / 128
     
     draw = ImageDraw.Draw(image)
     
-    # Dibujar GT en verde
-    for box in gt_boxes:
-        x1, y1, x2, y2 = [coord * scale for coord in box]
-        draw.rectangle([x1, y1, x2, y2], outline='green', width=2)
+    # Filtrar predicciones por threshold
+    filtered_preds = [box for box in pred_boxes if box[4] >= score_threshold]
     
     # Dibujar predicciones en rojo
-    for box in pred_boxes:
-        if box[4] >= score_threshold:
-            x1, y1, x2, y2, score = box
-            x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
-            draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
-            # Agregar score
-            draw.text((x1, y1 - 10), f'{score:.2f}', fill='red')
+    for box in filtered_preds:
+        x1, y1, x2, y2, score = box
+        x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
+        draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
+        draw.text((x1, y1 - 10), f'{score:.2f}', fill='red', font=None)
+    
+    # Agregar contador en la parte superior
+    total_pred = len(filtered_preds)
+    
+    # Fondo semi-transparente para el texto
+    overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    
+    # Barra superior
+    overlay_draw.rectangle([0, 0, 512, 50], fill=(0, 0, 0, 180))
+    
+    # Convertir a RGBA para overlay
+    image = image.convert('RGBA')
+    image = Image.alpha_composite(image, overlay)
+    image = image.convert('RGB')
+    
+    # Dibujar texto
+    draw = ImageDraw.Draw(image)
+    
+    # Línea 1: Contador
+    text_line1 = f"Vehículos Detectados: {total_pred}"
+    draw.text((10, 10), text_line1, fill='white', font=None)
+    
+    # Línea 2: Umbral
+    text_line2 = f"Umbral de confianza: {score_threshold}"
+    draw.text((10, 30), text_line2, fill='white', font=None)
+    
+    return image
+
+
+def visualize_predictions(image, pred_boxes, gt_boxes, score_threshold=0.15, iou_threshold=0.5):
+    """
+    Visualiza predicciones con análisis de errores (TP, FP, FN).
+    
+    Args:
+        image: PIL Image (512x512)
+        pred_boxes: Lista de predicciones [x1, y1, x2, y2, score]
+        gt_boxes: Lista de GT [x1, y1, x2, y2]
+        score_threshold: Umbral para visualizar
+        iou_threshold: Umbral de IoU para considerar TP
+        
+    Returns:
+        PIL Image con visualización y contador de errores
+    """
+    # Escalar del grid (128) a imagen (512)
+    scale = 512 / 128
+    
+    draw = ImageDraw.Draw(image)
+    
+    # Filtrar predicciones por threshold
+    filtered_preds = [box for box in pred_boxes if box[4] >= score_threshold]
+    
+    # Clasificar predicciones y GT
+    gt_matched = [False] * len(gt_boxes)
+    tp_boxes = []
+    fp_boxes = []
+    
+    for pred_box in filtered_preds:
+        best_iou = 0
+        best_gt_idx = -1
+        
+        for gt_idx, gt_box in enumerate(gt_boxes):
+            if gt_matched[gt_idx]:
+                continue
+            
+            iou = calculate_iou(pred_box[:4], gt_box)
+            if iou > best_iou:
+                best_iou = iou
+                best_gt_idx = gt_idx
+        
+        # Clasificar como TP o FP
+        if best_iou >= iou_threshold and best_gt_idx >= 0:
+            gt_matched[best_gt_idx] = True
+            tp_boxes.append(pred_box)
+        else:
+            fp_boxes.append(pred_box)
+    
+    # Contar FN (GT no detectados)
+    fn_boxes = [gt_boxes[i] for i in range(len(gt_boxes)) if not gt_matched[i]]
+    
+    # Dibujar FN en verde (GT no detectados)
+    for box in fn_boxes:
+        x1, y1, x2, y2 = [coord * scale for coord in box]
+        draw.rectangle([x1, y1, x2, y2], outline='green', width=3)
+    
+    # Dibujar TP en rojo (predicciones correctas)
+    for box in tp_boxes:
+        x1, y1, x2, y2, score = box
+        x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
+        draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
+        draw.text((x1, y1 - 10), f'{score:.2f}', fill='red', font=None)
+    
+    # Dibujar FP en amarillo (predicciones incorrectas)
+    for box in fp_boxes:
+        x1, y1, x2, y2, score = box
+        x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
+        draw.rectangle([x1, y1, x2, y2], outline='yellow', width=2)
+        draw.text((x1, y1 - 10), f'{score:.2f}', fill='yellow', font=None)
+    
+    # Agregar contador en la parte superior
+    tp_count = len(tp_boxes)
+    fp_count = len(fp_boxes)
+    fn_count = len(fn_boxes)
+    total_gt = len(gt_boxes)
+    total_pred = len(filtered_preds)
+    
+    # Fondo semi-transparente para el texto
+    overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    
+    # Barra superior
+    overlay_draw.rectangle([0, 0, 512, 70], fill=(0, 0, 0, 180))
+    
+    # Convertir a RGBA para overlay
+    image = image.convert('RGBA')
+    image = Image.alpha_composite(image, overlay)
+    image = image.convert('RGB')
+    
+    # Dibujar texto
+    draw = ImageDraw.Draw(image)
+    
+    # Línea 1: Contadores de error
+    text_line1 = f"TP: {tp_count} | FP: {fp_count} | FN: {fn_count}"
+    draw.text((10, 10), text_line1, fill='white', font=None)
+    
+    # Línea 2: Totales
+    text_line2 = f"Detectados: {total_pred} | Ground Truth: {total_gt}"
+    draw.text((10, 30), text_line2, fill='white', font=None)
+    
+    # Línea 3: Leyenda
+    text_line3 = "🔴 TP  🟡 FP  🟢 FN"
+    draw.text((10, 50), text_line3, fill='white', font=None)
     
     return image
 
@@ -481,7 +608,7 @@ def calculate_counting_metrics(predictions, ground_truths):
     }
 
 
-def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_threshold=0.25):
+def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_threshold=0.15):
     """
     Crea una visualización comparativa de heatmaps predichos vs ground truth.
     
@@ -510,27 +637,83 @@ def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_thresh
     # Crear figura con 4 subplots
     fig, axes = plt.subplots(2, 2, figsize=(16, 16))
     
+    scale = 512 / 128
+    
+    # Clasificar predicciones y GT para análisis de errores
+    filtered_preds = [box for box in pred_boxes if box[4] >= score_threshold]
+    gt_matched = [False] * len(gt_boxes)
+    tp_boxes = []
+    fp_boxes = []
+    
+    for pred_box in filtered_preds:
+        best_iou = 0
+        best_gt_idx = -1
+        
+        for gt_idx, gt_box in enumerate(gt_boxes):
+            if gt_matched[gt_idx]:
+                continue
+            
+            iou = calculate_iou(pred_box[:4], gt_box)
+            if iou > best_iou:
+                best_iou = iou
+                best_gt_idx = gt_idx
+        
+        if best_iou >= 0.5 and best_gt_idx >= 0:
+            gt_matched[best_gt_idx] = True
+            tp_boxes.append(pred_box)
+        else:
+            fp_boxes.append(pred_box)
+    
+    fn_boxes = [gt_boxes[i] for i in range(len(gt_boxes)) if not gt_matched[i]]
+    
     # 1. Imagen original con GT boxes
     axes[0, 0].imshow(img_np)
-    axes[0, 0].set_title('Ground Truth Boxes', fontsize=14, fontweight='bold')
+    title_gt = f'Ground Truth ({len(gt_boxes)} vehículos)'
+    axes[0, 0].set_title(title_gt, fontsize=14, fontweight='bold')
     axes[0, 0].axis('off')
-    scale = 512 / 128
     for box in gt_boxes:
         x1, y1, x2, y2 = [coord * scale for coord in box]
         rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, color='green', linewidth=2)
         axes[0, 0].add_patch(rect)
     
-    # 2. Imagen original con predicciones
+    # 2. Imagen con análisis de errores (TP, FP, FN)
     axes[0, 1].imshow(img_np)
-    axes[0, 1].set_title(f'Predicted Boxes (threshold={score_threshold})', fontsize=14, fontweight='bold')
+    title_pred = f'Análisis de Errores (TP:{len(tp_boxes)} FP:{len(fp_boxes)} FN:{len(fn_boxes)})'
+    axes[0, 1].set_title(title_pred, fontsize=14, fontweight='bold')
     axes[0, 1].axis('off')
-    for box in pred_boxes:
-        if box[4] >= score_threshold:
-            x1, y1, x2, y2, score = box
-            x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
-            rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, color='red', linewidth=2)
-            axes[0, 1].add_patch(rect)
-            axes[0, 1].text(x1, y1-5, f'{score:.2f}', color='red', fontsize=10, fontweight='bold')
+    
+    # Dibujar FN (verde)
+    for box in fn_boxes:
+        x1, y1, x2, y2 = [coord * scale for coord in box]
+        rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, color='green', linewidth=3, linestyle='--')
+        axes[0, 1].add_patch(rect)
+    
+    # Dibujar TP (rojo)
+    for box in tp_boxes:
+        x1, y1, x2, y2, score = box
+        x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
+        rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, color='red', linewidth=2)
+        axes[0, 1].add_patch(rect)
+        axes[0, 1].text(x1, y1-5, f'{score:.2f}', color='red', fontsize=9, fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    # Dibujar FP (amarillo)
+    for box in fp_boxes:
+        x1, y1, x2, y2, score = box
+        x1, y1, x2, y2 = [coord * scale for coord in [x1, y1, x2, y2]]
+        rect = plt.Rectangle((x1, y1), x2-x1, y2-y1, fill=False, color='yellow', linewidth=2)
+        axes[0, 1].add_patch(rect)
+        axes[0, 1].text(x1, y1-5, f'{score:.2f}', color='orange', fontsize=9, fontweight='bold',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    
+    # Leyenda
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='red', edgecolor='red', label=f'TP: {len(tp_boxes)}'),
+        Patch(facecolor='yellow', edgecolor='yellow', label=f'FP: {len(fp_boxes)}'),
+        Patch(facecolor='green', edgecolor='green', label=f'FN: {len(fn_boxes)}', linestyle='--')
+    ]
+    axes[0, 1].legend(handles=legend_elements, loc='upper right', fontsize=10)
     
     # 3. Ground Truth Heatmap
     axes[1, 0].imshow(img_np, alpha=0.5)
@@ -539,10 +722,11 @@ def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_thresh
     axes[1, 0].axis('off')
     plt.colorbar(hm_gt, ax=axes[1, 0], fraction=0.046)
     
-    # 4. Predicted Heatmap
+    # 4. Predicted Heatmap con confianza
     axes[1, 1].imshow(img_np, alpha=0.5)
     hm_pred = axes[1, 1].imshow(pred_hm_resized, cmap='jet', alpha=0.6, vmin=0, vmax=1)
-    axes[1, 1].set_title('Predicted Heatmap', fontsize=14, fontweight='bold')
+    max_conf = pred_hm_np.max()
+    axes[1, 1].set_title(f'Predicted Heatmap (max conf: {max_conf:.3f})', fontsize=14, fontweight='bold')
     axes[1, 1].axis('off')
     plt.colorbar(hm_pred, ax=axes[1, 1], fraction=0.046)
     
@@ -551,7 +735,7 @@ def visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_thresh
     return fig
 
 
-def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_path, score_threshold=0.25):
+def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_path, score_threshold=0.15):
     """
     Guarda la visualización comparativa de heatmaps.
     
@@ -569,7 +753,7 @@ def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_pa
     plt.close(fig)
 
 
-def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='results/', score_threshold=0.25, nms_threshold=0.5):
+def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='results/', score_threshold=0.15, nms_threshold=0.5):
     """
     Función principal de evaluación.
     
@@ -643,6 +827,11 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
             heatmap_dir = os.path.join(output_dir, 'heatmaps')
             os.makedirs(heatmap_dir, exist_ok=True)
             print(f"🔥 Guardando comparaciones de heatmaps en: {heatmap_dir}")
+        
+        # Crear carpeta para predicciones solas (sin GT)
+        predictions_dir = os.path.join(output_dir, 'predictions_only')
+        os.makedirs(predictions_dir, exist_ok=True)
+        print(f"🎯 Guardando predicciones puras en: {predictions_dir}")
     
     with torch.no_grad():
         for idx, batch in enumerate(tqdm(test_loader, desc="Evaluando")):
@@ -682,12 +871,19 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
             # Visualizar boxes (primeras 20 imágenes)
             if save_viz and idx < 20:
                 vis_img = visualize_predictions(img.copy(), pred_boxes, gt_boxes, score_threshold)
-                vis_path = os.path.join(output_dir, f"pred_{idx:04d}.jpg")
+                img_basename = os.path.splitext(img_file)[0]  # Nombre sin extensión
+                vis_path = os.path.join(output_dir, f"pred_{img_basename}.jpg")
                 vis_img.save(vis_path)
+                
+                # Guardar también versión solo con predicciones
+                pred_only_img = visualize_predictions_only(img.copy(), pred_boxes, score_threshold)
+                pred_only_path = os.path.join(predictions_dir, f"pred_{img_basename}.jpg")
+                pred_only_img.save(pred_only_path)
             
             # Visualizar heatmaps (primeras 20 imágenes)
             if save_heatmaps and idx < 20:
-                heatmap_path = os.path.join(heatmap_dir, f"heatmap_{idx:04d}.png")
+                img_basename = os.path.splitext(img_file)[0]  # Nombre sin extensión
+                heatmap_path = os.path.join(heatmap_dir, f"heatmap_{img_basename}.png")
                 save_heatmap_comparison(
                     img.copy(), 
                     hm_pred[0].cpu(), 
