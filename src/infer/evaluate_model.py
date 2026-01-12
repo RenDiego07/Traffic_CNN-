@@ -289,7 +289,7 @@ def calculate_ap(predictions, ground_truths, iou_threshold=0.5):
     indices = np.where(recalls[1:] != recalls[:-1])[0]
     ap = np.sum((recalls[indices + 1] - recalls[indices]) * precisions[indices + 1])
     
-    return ap, precisions, recalls
+    return ap, precisions[:-1], recalls[:-1]  # Remover último punto añadido
 
 
 def visualize_predictions_only(image, pred_boxes, score_threshold=0.15):
@@ -454,7 +454,7 @@ def visualize_predictions(image, pred_boxes, gt_boxes, score_threshold=0.15, iou
     return image
 
 
-def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5):
+def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5, grid_size=128):
     """
     Calcula la matriz de confusión para detección de objetos.
     
@@ -462,9 +462,10 @@ def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5):
         predictions: Lista de predicciones [(image_id, [boxes])]
         ground_truths: Lista de GT [(image_id, [boxes])]
         iou_threshold: Umbral de IoU para considerar TP
+        grid_size: Tamaño del grid de salida (default: 128) - no usado para TN
         
     Returns:
-        dict: TP, FP, FN, TN (TN=0 para detección), precision, recall, f1
+        dict: TP, FP, FN (sin TN por irrelevancia), precision, recall, f1
     """
     tp = 0  # True Positives: detecciones correctas
     fp = 0  # False Positives: detecciones incorrectas
@@ -505,6 +506,8 @@ def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5):
         # Contar GT no detectados
         fn += sum(1 for matched in gt_matched if not matched)
     
+    # TN omitido por irrelevancia en detección de objetos
+    
     # Calcular métricas
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
@@ -514,7 +517,6 @@ def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5):
         'TP': tp,
         'FP': fp,
         'FN': fn,
-        'TN': 0,  # No aplica para detección de objetos
         'precision': precision,
         'recall': recall,
         'f1_score': f1_score
@@ -523,48 +525,132 @@ def calculate_confusion_matrix(predictions, ground_truths, iou_threshold=0.5):
 
 def plot_confusion_matrix(confusion_metrics, save_path=None):
     """
-    Visualiza la matriz de confusión.
+    Visualiza la matriz de confusión estilo simple (similar a ejemplo médico).
+    
+    Matriz 2×2 con estilo minimalista (omitiendo TN por irrelevancia):
+    - Filas: Valor real (Normal, Carro)
+    - Columnas: Predicción (Normal, Carro)
+    - TN se muestra como "—" (no relevante para detección de objetos)
     
     Args:
-        confusion_metrics: Dict con TP, FP, FN, TN
+        confusion_metrics: Dict con TP, FP, FN (TN no necesario)
         save_path: Ruta donde guardar la imagen (opcional)
     """
-    # Crear matriz 2x2 (para visualización, aunque TN=0)
-    # Filas: Actual (GT), Columnas: Predicho
+    # Crear matriz 2×2 con valores numéricos (TN = -1 para marcarlo especial)
+    # Estructura: Filas = Valor real, Columnas = Predicción
     cm = np.array([
-        [confusion_metrics['TP'], confusion_metrics['FN']],  # Actual: Positivo
-        [confusion_metrics['FP'], confusion_metrics['TN']]   # Actual: Negativo
-    ])
+        [-1, confusion_metrics['FP']],  # Real: Normal (no-carro)
+        [confusion_metrics['FN'], confusion_metrics['TP']]   # Real: Carro
+    ], dtype=float)
     
-    # Crear figura
+    # Crear figura con proporciones similares al ejemplo
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Crear heatmap
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=['Detected', 'Not Detected'],
-                yticklabels=['Vehicle (GT)', 'Background'],
-                cbar_kws={'label': 'Count'},
-                ax=ax, annot_kws={'size': 16, 'weight': 'bold'})
+    # Crear colormap personalizado que muestra blanco para valores negativos
+    cmap = plt.cm.Blues.copy()
+    cmap.set_under('white')
     
-    # Títulos y etiquetas
-    ax.set_title('Confusion Matrix - Vehicle Detection', 
-                 fontsize=16, fontweight='bold', pad=20)
-    ax.set_xlabel('Predicted', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Actual (Ground Truth)', fontsize=14, fontweight='bold')
+    # Crear heatmap con configuración especial para TN
+    sns.heatmap(cm, annot=False, fmt='d', cmap=cmap, 
+                xticklabels=['Normal', 'Carro'],
+                yticklabels=['Normal', 'Carro'],
+                cbar=True,
+                ax=ax,
+                linewidths=2,
+                linecolor='white',
+                square=True,
+                vmin=0,  # Valores < 0 usarán el color "under" (blanco)
+                cbar_kws={'shrink': 0.8})
     
-    # Agregar métricas en el título
-    metrics_text = f"Precision: {confusion_metrics['precision']:.3f}  |  "
-    metrics_text += f"Recall: {confusion_metrics['recall']:.3f}  |  "
-    metrics_text += f"F1-Score: {confusion_metrics['f1_score']:.3f}"
+    # Agregar anotaciones manualmente
+    # TN (posición [0, 0]): mostrar "—"
+    ax.text(0.5, 0.5, '—', 
+           ha='center', va='center', fontsize=28, weight='normal', color='gray')
     
-    plt.figtext(0.5, 0.02, metrics_text, ha='center', fontsize=12, 
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    # FP (posición [0, 1])
+    ax.text(1.5, 0.5, str(int(confusion_metrics['FP'])), 
+           ha='center', va='center', fontsize=28, weight='bold', color='black')
+    
+    # FN (posición [1, 0])
+    ax.text(0.5, 1.5, str(int(confusion_metrics['FN'])), 
+           ha='center', va='center', fontsize=28, weight='bold', color='black')
+    
+    # TP (posición [1, 1])
+    ax.text(1.5, 1.5, str(int(confusion_metrics['TP'])), 
+           ha='center', va='center', fontsize=28, weight='bold', color='black')
+    
+    # Título simple
+    ax.set_title('Matriz de Confusión', 
+                 fontsize=20, fontweight='normal', pad=20, color='#4a4a4a')
+    
+    # Etiquetas de ejes
+    ax.set_xlabel('Predicción', fontsize=16, fontweight='normal', color='#4a4a4a')
+    ax.set_ylabel('Valor real', fontsize=16, fontweight='normal', color='#4a4a4a')
+    
+    # Ajustar estilo de los tick labels
+    ax.tick_params(axis='both', which='major', labelsize=14, colors='#4a4a4a')
+    
+    # Rotar etiquetas del eje x para mejor legibilidad
+    plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
+    plt.setp(ax.get_yticklabels(), rotation=90, ha="center", va="center")
     
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
         print(f"💾 Matriz de confusión guardada: {save_path}")
+    
+    plt.close(fig)
+
+
+def plot_precision_recall_curve(precisions_dict, recalls_dict, aps_dict, save_path=None):
+    """
+    Genera y guarda la curva Precision-Recall para IoU=0.50.
+    
+    Args:
+        precisions_dict: Dict con precisions por IoU threshold {0.5: array}
+        recalls_dict: Dict con recalls por IoU threshold {0.5: array}
+        aps_dict: Dict con AP por IoU threshold {0.5: float}
+        save_path: Ruta donde guardar la imagen
+    """
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Solo graficar curva para IoU=0.50
+    iou_thresh = 0.5
+    precisions = precisions_dict[iou_thresh]
+    recalls = recalls_dict[iou_thresh]
+    ap = aps_dict[iou_thresh]
+    
+    # Graficar curva principal
+    ax.plot(recalls, precisions, color='#2E86AB', linewidth=3, 
+            label=f'AP = {ap:.3f}', marker='o', 
+            markersize=4, markevery=max(1, len(recalls)//20))
+    
+    # Línea de referencia (precision constante)
+    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1, alpha=0.5, label='Baseline (P=0.5)')
+    
+    # Configuración de ejes
+    ax.set_xlabel('Recall', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Precision', fontsize=14, fontweight='bold')
+    ax.set_title('Curva Precision-Recall (IoU=0.50)', fontsize=16, fontweight='bold', pad=20)
+    
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    
+    # Grid
+    ax.grid(True, linestyle=':', alpha=0.6, linewidth=0.8)
+    
+    # Leyenda
+    ax.legend(loc='lower left', fontsize=12, framealpha=0.95, edgecolor='black')
+    
+    # Estilo
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+        print(f"💾 Curva PR guardada: {save_path}")
     
     plt.close(fig)
 
@@ -910,6 +996,8 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
     # Calcular AP para diferentes thresholds de IoU
     iou_thresholds = [0.5, 0.75, 0.9]
     aps = {}
+    precisions_curves = {}
+    recalls_curves = {}
     
     for iou_thresh in iou_thresholds:
         ap, precisions, recalls = calculate_ap(
@@ -918,6 +1006,8 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
             iou_threshold=iou_thresh
         )
         aps[iou_thresh] = ap
+        precisions_curves[iou_thresh] = precisions
+        recalls_curves[iou_thresh] = recalls
         print(f"   AP @ IoU={iou_thresh:.2f}: {ap:.4f}")
     
     # Calcular mAP
@@ -962,6 +1052,10 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
     if save_viz or save_heatmaps:
         cm_path = os.path.join(output_dir, 'confusion_matrix.png')
         plot_confusion_matrix(confusion_metrics, save_path=cm_path)
+        
+        # Guardar curva Precision-Recall
+        pr_path = os.path.join(output_dir, 'precision_recall_curve.png')
+        plot_precision_recall_curve(precisions_curves, recalls_curves, aps, save_path=pr_path)
     
     # ========================================================================
     # 5.4 ESTADÍSTICAS GENERALES
@@ -1010,6 +1104,36 @@ def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='r
     }
 
 
+def generate_sample_confusion_matrix(output_path='confusion_matrix_example.png'):
+    """
+    Genera una matriz de confusión de ejemplo para visualización.
+    NOTA: Los valores son solo de ejemplo. Para métricas reales, ejecutar
+    evaluación completa del modelo en el conjunto de test.
+    
+    Args:
+        output_path: Ruta donde guardar la imagen
+    """
+    # Datos de ejemplo (valores típicos de un modelo de detección)
+    # TN omitido por irrelevancia en detección de objetos
+    sample_metrics = {
+        'TP': 514,       # Carros correctamente detectados
+        'FP': 21,        # Detecciones falsas
+        'FN': 24,        # Carros no detectados
+        'precision': 0.9607,
+        'recall': 0.9554,
+        'f1_score': 0.9580
+    }
+    
+    print("🎨 Generando matriz de confusión de ejemplo...")
+    print(f"   FP (Falsos carros): {sample_metrics['FP']}")
+    print(f"   FN (Carros perdidos): {sample_metrics['FN']}")
+    print(f"   TP (Carros detectados): {sample_metrics['TP']}")
+    print(f"   TN: Omitido (irrelevante para detección)")
+    
+    plot_confusion_matrix(sample_metrics, save_path=output_path)
+    print(f"✅ Matriz generada exitosamente: {output_path}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluar TrafficQuantizerNet en conjunto de test')
     parser.add_argument(
@@ -1046,23 +1170,34 @@ if __name__ == "__main__":
         default=0.5,
         help='Umbral de IoU para NMS'
     )
+    parser.add_argument(
+        '--generate-example',
+        action='store_true',
+        help='Generar matriz de confusión de ejemplo sin evaluar modelo'
+    )
     
     args = parser.parse_args()
     
-    # Si no se especifica checkpoint, usar el modelo final
-    if args.checkpoint is None:
-        args.checkpoint = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            'models',
-            'traffic_model_final.pth'
+    # Si se solicita generar ejemplo
+    if args.generate_example:
+        output_path = os.path.join(args.output_dir, 'confusion_matrix_example.png')
+        os.makedirs(args.output_dir, exist_ok=True)
+        generate_sample_confusion_matrix(output_path)
+    else:
+        # Si no se especifica checkpoint, usar el modelo final
+        if args.checkpoint is None:
+            args.checkpoint = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                'models',
+                'traffic_model_final.pth'
+            )
+        
+        # Ejecutar evaluación
+        results = evaluate(
+            checkpoint_path=args.checkpoint,
+            save_viz=args.save_viz,
+            save_heatmaps=args.save_heatmaps,
+            output_dir=args.output_dir,
+            score_threshold=args.score_threshold,
+            nms_threshold=args.nms_threshold
         )
-    
-    # Ejecutar evaluación
-    results = evaluate(
-        checkpoint_path=args.checkpoint,
-        save_viz=args.save_viz,
-        save_heatmaps=args.save_heatmaps,
-        output_dir=args.output_dir,
-        score_threshold=args.score_threshold,
-        nms_threshold=args.nms_threshold
-    )
