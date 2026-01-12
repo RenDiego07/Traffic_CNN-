@@ -174,7 +174,7 @@ class TrafficQuantizerNet(nn.Module):
     Outputs:
         hm: Heatmap (B, 1, 128, 128) - Probabilidad de centro de vehículo
         wh: Size (B, 2, 128, 128) - Ancho y alto del bbox
-        off: Offset (B, 2, 128, 128) - Corrección de discretización
+        off: Offset (B, 2, 128, 128) - Corrección de discretizaciónxx
     """
     def __init__(self):
         super(TrafficQuantizerNet, self).__init__()
