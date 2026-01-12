@@ -8,7 +8,7 @@
 </head>
 <body>
     <h1>Analizador de Tráfico Vehicular</h1>
-    <p>Cargue una imagen de una intersección (1920x1080) para cuantificar los vehículos presentes.</p>
+    <p>Cargue una imagen para detectar y contar los vehículos presentes.</p>
     
     <form id="upload-form" enctype="multipart/form-data">
         <input type="file" id="file-input" name="file" accept="image/*" required>
@@ -17,11 +17,66 @@
 
     <div id="result-container">
         <h2>Resultado del Análisis</h2>
-        <div id="image-preview"></div>
+        <div id="canvas-container">
+            <canvas id="image-canvas"></canvas>
+        </div>
         <p>Número de vehículos detectados: <strong id="vehicle-count">---</strong></p>
+        <div id="vehicles-list"></div>
     </div>
 
     <script>
+        function drawBoundingBoxes(imageData, vehicles, imageSize) {
+            const canvas = document.getElementById('image-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Crear imagen temporal para cargarla en el canvas
+            const img = new Image();
+            img.onload = function() {
+                // Ajustar canvas al tamaño de la imagen
+                const maxWidth = 800;
+                const maxHeight = 600;
+                const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+                
+                canvas.width = img.width * scale;
+                canvas.height = img.height * scale;
+                
+                // Dibujar la imagen
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // Dibujar bounding boxes
+                vehicles.forEach((vehicle, index) => {
+                    const bbox = vehicle.bbox;
+                    const confidence = vehicle.confidence;
+                    
+                    // Escalar coordenadas según el canvas
+                    const x1 = (bbox.x1 / imageSize.width) * canvas.width;
+                    const y1 = (bbox.y1 / imageSize.height) * canvas.height;
+                    const width = (bbox.width / imageSize.width) * canvas.width;
+                    const height = (bbox.height / imageSize.height) * canvas.height;
+                    
+                    // Color del box (rojo con transparencia)
+                    ctx.strokeStyle = '#FF0000';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(x1, y1, width, height);
+                    
+                    // Fondo para el texto
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(x1, y1 - 30, 150, 30);
+                    
+                    // Texto con ID y confianza
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.fillText(
+                        `Veh #${vehicle.id} (${(confidence * 100).toFixed(1)}%)`,
+                        x1 + 5,
+                        y1 - 10
+                    );
+                });
+            };
+            
+            img.src = imageData;
+        }
+
         document.getElementById('upload-form').addEventListener('submit', function(event) {
             event.preventDefault();
 
@@ -31,39 +86,54 @@
             formData.append('file', file);
 
             const resultCount = document.getElementById('vehicle-count');
-            const imagePreview = document.getElementById('image-preview');
+            const vehiclesList = document.getElementById('vehicles-list');
             
             resultCount.textContent = 'Procesando...';
-            imagePreview.innerHTML = ''; // Limpiar vista previa anterior
+            vehiclesList.innerHTML = ''; // Limpiar lista anterior
 
             if (file) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const img = document.createElement('img');
-                    img.src = e.target.result;
-                    img.style.maxWidth = '500px';
-                    img.style.maxHeight = '500px';
-                    imagePreview.appendChild(img);
-                }
+                    const imageData = e.target.result;
+                    
+                    fetch('/predict', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            resultCount.textContent = `Error: ${data.error}`;
+                            vehiclesList.innerHTML = `<p style="color: red;">${data.error}</p>`;
+                        } else {
+                            resultCount.textContent = data.vehicle_count;
+                            
+                            // Dibujar imagen con bounding boxes
+                            drawBoundingBoxes(imageData, data.vehicles, data.image_size);
+                            
+                            // Mostrar lista de vehículos detectados
+                            if (data.vehicles.length > 0) {
+                                let listHTML = '<h3>Vehículos Detectados:</h3><ul>';
+                                data.vehicles.forEach(vehicle => {
+                                    const confidence = (vehicle.confidence * 100).toFixed(1);
+                                    const width = vehicle.bbox.width.toFixed(2);
+                                    const height = vehicle.bbox.height.toFixed(2);
+                                    listHTML += `<li>Vehículo #${vehicle.id}: Confianza ${confidence}% | Tamaño: ${width}x${height}px</li>`;
+                                });
+                                listHTML += '</ul>';
+                                vehiclesList.innerHTML = listHTML;
+                            } else {
+                                vehiclesList.innerHTML = '<p>No se detectaron vehículos en la imagen.</p>';
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        resultCount.textContent = 'Error en la comunicación con el servidor.';
+                    });
+                };
                 reader.readAsDataURL(file);
             }
-
-            fetch('/predict', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    resultCount.textContent = `Error: ${data.error}`;
-                } else {
-                    resultCount.textContent = data.vehicle_count;
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                resultCount.textContent = 'Error en la comunicación con el servidor.';
-            });
         });
     </script>
 </body>

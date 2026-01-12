@@ -9,7 +9,7 @@ body {
     align-items: center;
 }
 
-h1, h2 {
+h1, h2, h3 {
     color: #444;
 }
 
@@ -47,16 +47,52 @@ button:hover {
     border-radius: 8px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     text-align: center;
-    min-width: 500px;
+    max-width: 900px;
 }
 
-#image-preview img {
-    margin-top: 1em;
-    border: 1px solid #ddd;
+#canvas-container {
+    margin-top: 1.5em;
+    margin-bottom: 1.5em;
+    display: flex;
+    justify-content: center;
+}
+
+#image-canvas {
+    border: 2px solid #ddd;
     border-radius: 4px;
+    max-width: 100%;
+    height: auto;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 #vehicle-count {
     font-size: 1.5em;
     color: #007bff;
+}
+
+#vehicles-list {
+    margin-top: 1.5em;
+    text-align: left;
+}
+
+#vehicles-list ul {
+    list-style-type: none;
+    padding: 0;
+    background-color: #f9f9f9;
+    border-radius: 4px;
+    padding: 1em;
+}
+
+#vehicles-list li {
+    padding: 0.5em 0;
+    border-bottom: 1px solid #eee;
+}
+
+#vehicles-list li:last-child {
+    border-bottom: none;
+}
+
+#vehicles-list p {
+    color: #666;
+    font-style: italic;
 }
