@@ -1,9 +1,7 @@
 import numpy as np
 
 def gaussian_radius(det_size, min_overlap=0.7):
-    """
-    Calcula el radio de la gaussiana (sigma) adaptativo basado en el tamaño del objeto (h, w).
-    """
+
     height, width = det_size
     a1  = 1
     b1  = (height + width)
@@ -25,7 +23,6 @@ def gaussian_radius(det_size, min_overlap=0.7):
     return min(r1, r2, r3)
 
 def gaussian2D(shape, sigma=1):
-    """Genera el kernel gaussiano 2D."""
     m, n = [(ss - 1.) / 2. for ss in shape]
     y, x = np.ogrid[-m:m+1,-n:n+1]
     h = np.exp(-(x * x + y * y) / (2 * sigma * sigma))
@@ -33,10 +30,7 @@ def gaussian2D(shape, sigma=1):
     return h
 
 def draw_gaussian(heatmap, center, radius, k=1):
-    """
-    Dibuja la mancha gaussiana en el heatmap (in-place).
-    Maneja los bordes de la imagen y las superposiciones (max).
-    """
+
     diameter = 2 * radius + 1
     gaussian = gaussian2D((diameter, diameter), sigma=diameter / 6)
     

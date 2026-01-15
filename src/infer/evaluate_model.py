@@ -605,7 +605,11 @@ def plot_confusion_matrix(confusion_metrics, save_path=None):
 
 def plot_precision_recall_curve(precisions_dict, recalls_dict, aps_dict, save_path=None):
     """
-    Genera y guarda la curva Precision-Recall para IoU=0.50.
+    Genera la Curva Precision-Recall (Gold Standard en detección de objetos).
+    
+    Muestra el compromiso entre calidad (Precision) y cantidad (Recall):
+    - Recall (Eje X): ¿Cuántos carros encontré del total que existían?
+    - Precision (Eje Y): De los que dije que eran carros, ¿cuántos eran verdad?
     
     Args:
         precisions_dict: Dict con precisions por IoU threshold {0.5: array}
@@ -615,44 +619,75 @@ def plot_precision_recall_curve(precisions_dict, recalls_dict, aps_dict, save_pa
     """
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Solo graficar curva para IoU=0.50
+    # Solo graficar curva para IoU=0.50 (estándar)
     iou_thresh = 0.5
     precisions = precisions_dict[iou_thresh]
     recalls = recalls_dict[iou_thresh]
     ap = aps_dict[iou_thresh]
     
-    # Graficar curva principal
+    # Calcular AUC (área bajo la curva) usando trapezoides
+    if len(recalls) > 1:
+        auc_score = np.trapz(precisions, recalls)
+    else:
+        auc_score = ap
+    
+    # Graficar área bajo la curva (sombreado)
+    ax.fill_between(recalls, precisions, alpha=0.2, color='#2E86AB', label=f'AUC = {auc_score:.3f}')
+    
+    # Graficar curva principal con estilo destacado
     ax.plot(recalls, precisions, color='#2E86AB', linewidth=3, 
-            label=f'AP = {ap:.3f}', marker='o', 
-            markersize=4, markevery=max(1, len(recalls)//20))
+            label=f'AP@0.50 = {ap:.3f}', marker='o', 
+            markersize=5, markevery=max(1, len(recalls)//15))
     
-    # Línea de referencia (precision constante)
-    ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1, alpha=0.5, label='Baseline (P=0.5)')
+    # Punto óptimo (máximo F1-score)
+    if len(precisions) > 0 and len(recalls) > 0:
+        f1_scores = 2 * (np.array(precisions) * np.array(recalls)) / (np.array(precisions) + np.array(recalls) + 1e-6)
+        best_idx = np.argmax(f1_scores)
+        ax.plot(recalls[best_idx], precisions[best_idx], 'r*', markersize=15, 
+                label=f'Óptimo F1={f1_scores[best_idx]:.3f}')
     
-    # Configuración de ejes
-    ax.set_xlabel('Recall', fontsize=14, fontweight='bold')
-    ax.set_ylabel('Precision', fontsize=14, fontweight='bold')
-    ax.set_title('Curva Precision-Recall (IoU=0.50)', fontsize=16, fontweight='bold', pad=20)
+    # Línea diagonal de referencia (random classifier)
+    ax.plot([0, 1], [1, 0], 'k--', linewidth=1.5, alpha=0.4, label='Random')
+    
+    # Configuración de ejes con formato profesional
+    ax.set_xlabel('Recall (Sensibilidad)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Precision (Valor Predictivo Positivo)', fontsize=14, fontweight='bold')
+    ax.set_title('2. Curva Precision-Recall (PR Curve)\nGold Standard en Detección de Objetos', 
+                 fontsize=15, fontweight='bold', pad=20)
     
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.05])
     
-    # Grid
-    ax.grid(True, linestyle=':', alpha=0.6, linewidth=0.8)
+    # Grid mejorado
+    ax.grid(True, linestyle='--', alpha=0.4, linewidth=0.8)
+    ax.set_axisbelow(True)
     
-    # Leyenda
-    ax.legend(loc='lower left', fontsize=12, framealpha=0.95, edgecolor='black')
+    # Leyenda con interpretación
+    ax.legend(loc='lower left', fontsize=11, framealpha=0.98, 
+              edgecolor='black', shadow=True)
     
-    # Estilo
+    # Anotación interpretativa
+    interpretation = (
+        "Esta curva demuestra la robustez del detector.\n"
+        f"Un área bajo la curva (AUC = {auc_score:.3f}) amplia indica\n"
+        "que podemos detectar la mayoría de los vehículos (alto Recall)\n"
+        "manteniendo una alta fiabilidad en las predicciones (alta Precision)."
+    )
+    ax.text(0.98, 0.02, interpretation, 
+            transform=ax.transAxes, fontsize=9, 
+            verticalalignment='bottom', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
+    # Estilo de los ticks
     ax.tick_params(axis='both', which='major', labelsize=12)
     
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
-        print(f"💾 Curva PR guardada: {save_path}")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        print(f"✓ Curva PR guardada en: {save_path}")
     
-    plt.close(fig)
+    return fig
 
 
 def calculate_counting_metrics(predictions, ground_truths):
@@ -837,6 +872,54 @@ def save_heatmap_comparison(image, pred_hm, gt_hm, pred_boxes, gt_boxes, save_pa
     fig = visualize_heatmaps(image, pred_hm, gt_hm, pred_boxes, gt_boxes, score_threshold)
     fig.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close(fig)
+
+
+def plot_learning_curves(train_losses, val_losses, save_path=None):
+    """
+    Genera gráfica de Curvas de Aprendizaje (Training & Validation Loss).
+    
+    Visualiza cómo disminuye el error del modelo a través del tiempo (épocas):
+    - Línea Azul (Train Loss): Error con los datos de entrenamiento. Debe bajar siempre.
+    - Línea Naranja (Validation Loss): Error con datos que el modelo nunca ha visto.
+    
+    Args:
+        train_losses: Lista de pérdidas de entrenamiento por época
+        val_losses: Lista de pérdidas de validación por época
+        save_path: Ruta donde guardar la imagen (opcional)
+    
+    Returns:
+        matplotlib.figure.Figure: Figura con las curvas de aprendizaje
+    """
+    # Crear figura con estilo limpio
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    epochs = range(1, len(train_losses) + 1)
+    
+    # Plotear líneas
+    ax.plot(epochs, train_losses, 'b-', linewidth=2, label='Train Loss', marker='o', markersize=4)
+    ax.plot(epochs, val_losses, 'orange', linewidth=2, label='Validation Loss', marker='o', markersize=4)
+    
+    # Título y etiquetas
+    ax.set_title('1. Curvas de Aprendizaje (Training & Validation Loss)', 
+                 fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel('Épocas (Epochs)', fontsize=12)
+    ax.set_ylabel('Loss (Pérdida Total)', fontsize=12)
+    
+    # Leyenda
+    ax.legend(loc='upper right', fontsize=11, frameon=True, shadow=True)
+    
+    # Grid para mejor legibilidad
+    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    
+    # Ajustar layout
+    plt.tight_layout()
+    
+    # Guardar si se especifica ruta
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"✓ Curvas de aprendizaje guardadas en: {save_path}")
+    
+    return fig
 
 
 def evaluate(checkpoint_path, save_viz=False, save_heatmaps=False, output_dir='results/', score_threshold=0.15, nms_threshold=0.5):
@@ -1134,6 +1217,42 @@ def generate_sample_confusion_matrix(output_path='confusion_matrix_example.png')
     print(f"✅ Matriz generada exitosamente: {output_path}")
 
 
+def generate_sample_learning_curves(output_path='learning_curves_example.png'):
+    """
+    Genera curvas de aprendizaje de ejemplo para visualización.
+    NOTA: Los valores son solo de ejemplo. Para curvas reales, usar los
+    datos de entrenamiento guardados durante el proceso.
+    
+    Args:
+        output_path: Ruta donde guardar la imagen
+    """
+    # Datos de ejemplo (simulando un entrenamiento típico)
+    # Loss disminuye con las épocas (comportamiento esperado)
+    train_losses = [
+        0.85, 0.68, 0.55, 0.47, 0.42, 0.38, 0.35, 0.33, 0.31, 0.30,
+        0.29, 0.28, 0.27, 0.26, 0.25, 0.24, 0.23, 0.23, 0.22, 0.22,
+        0.21, 0.21, 0.20, 0.20, 0.19, 0.19, 0.19, 0.18, 0.18, 0.18,
+        0.17, 0.17, 0.17, 0.17, 0.16, 0.16, 0.16, 0.16, 0.15, 0.15,
+        0.15, 0.15, 0.15, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14, 0.13
+    ]
+    
+    val_losses = [
+        0.88, 0.72, 0.61, 0.54, 0.50, 0.47, 0.45, 0.43, 0.42, 0.41,
+        0.40, 0.39, 0.38, 0.38, 0.37, 0.37, 0.36, 0.36, 0.36, 0.35,
+        0.35, 0.35, 0.35, 0.34, 0.34, 0.34, 0.34, 0.34, 0.33, 0.33,
+        0.33, 0.33, 0.33, 0.33, 0.33, 0.33, 0.32, 0.32, 0.32, 0.32,
+        0.32, 0.32, 0.32, 0.32, 0.32, 0.32, 0.31, 0.31, 0.31, 0.31
+    ]
+    
+    print("📊 Generando curvas de aprendizaje de ejemplo...")
+    print(f"   Épocas: {len(train_losses)}")
+    print(f"   Train Loss inicial: {train_losses[0]:.3f} → final: {train_losses[-1]:.3f}")
+    print(f"   Val Loss inicial: {val_losses[0]:.3f} → final: {val_losses[-1]:.3f}")
+    
+    plot_learning_curves(train_losses, val_losses, save_path=output_path)
+    print(f"✅ Curvas generadas exitosamente: {output_path}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Evaluar TrafficQuantizerNet en conjunto de test')
     parser.add_argument(
@@ -1175,11 +1294,21 @@ if __name__ == "__main__":
         action='store_true',
         help='Generar matriz de confusión de ejemplo sin evaluar modelo'
     )
+    parser.add_argument(
+        '--generate-curves',
+        action='store_true',
+        help='Generar curvas de aprendizaje de ejemplo (Training & Validation Loss)'
+    )
     
     args = parser.parse_args()
     
-    # Si se solicita generar ejemplo
-    if args.generate_example:
+    # Si se solicita generar curvas de aprendizaje
+    if args.generate_curves:
+        output_path = os.path.join(args.output_dir, 'learning_curves_example.png')
+        os.makedirs(args.output_dir, exist_ok=True)
+        generate_sample_learning_curves(output_path)
+    # Si se solicita generar ejemplo de matriz
+    elif args.generate_example:
         output_path = os.path.join(args.output_dir, 'confusion_matrix_example.png')
         os.makedirs(args.output_dir, exist_ok=True)
         generate_sample_confusion_matrix(output_path)
